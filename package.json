@@ -1,0 +1,32 @@
+{
+  "name": "dsh-lexiang",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DeepSeek Harness plugin repository: Lexiang knowledge base tools with a built-in UI popup and web console. Plugin entry lives in dsh-lexiang/.",
+  "main": "./dsh-lexiang/index.js",
+  "files": [
+    "dsh-lexiang"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "lexiang",
+    "knowledge-base",
+    "mcp",
+    "ui"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./dsh-lexiang/cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/cordis": "^4.0.2"
+  },
+  "license": "MIT"
+}
