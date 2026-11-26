@@ -2,5 +2,5 @@ url: https://github.com/fz217/dsh-
 name: fz217/dsh-
 category: docs
 description:
-  en: Connects DeepSeek Harness to the Lexiang knowledge base with tools for semantic search, page reading, page creation, page updates, directory browsing and file uploads, authenticated through environment variables.
-  zh: 把 DeepSeek Harness 连接到乐享知识库，提供语义搜索、页面读取、创建与更新、目录浏览和文件上传工具，令牌通过环境变量注入。
+  en: Connects DeepSeek Harness to the Lexiang knowledge base with search, read, create, update, browse and upload tools, plus a built-in UI popup and web console, authenticated through environment variables.
+  zh: 把 DeepSeek Harness 连接到乐享知识库，提供搜索、读取、创建、更新、目录浏览和文件上传工具，并自带 UI 弹窗与网页控制台，令牌通过环境变量注入。
