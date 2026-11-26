@@ -9,6 +9,37 @@
 import { buildConsoleHtml, normalizeItems } from './ui.js'
 import * as ops from './operations.js'
 
+const PREVIEW_LIMIT = 512 * 1024
+const entryId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value)
+const isMarkdown = row => /^(?:\.?md|\.?markdown)$/i.test(row.extension || '') || /\.(?:md|markdown)$/i.test((row.name || '').trim())
+
+async function downloadMarkdown(value) {
+  const url = new URL(value)
+  if (url.protocol !== 'https:' || url.host !== 'file.lexiang-asset.com' || url.username || url.password) throw new Error('Unexpected Lexiang file host')
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(15000) })
+  if (!response.ok || !response.body) {
+    await response.body?.cancel().catch(() => {})
+    throw new Error('Unable to download Markdown')
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  const chunks = []
+  let size = 0
+  try {
+    for (;;) {
+      const { value: bytes, done } = await reader.read()
+      if (done) return { markdown: chunks.join('') + decoder.decode(), truncated: false }
+      const remaining = PREVIEW_LIMIT - size
+      if (bytes.byteLength > remaining) {
+        chunks.push(decoder.decode(bytes.subarray(0, remaining), { stream: true }))
+        return { markdown: chunks.join(''), truncated: true }
+      }
+      size += bytes.byteLength
+      chunks.push(decoder.decode(bytes, { stream: true }))
+    }
+  } finally { await reader.cancel().catch(() => {}) }
+}
+
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.statusCode = status
   res.setHeader('content-type', type)
@@ -76,7 +107,7 @@ export function registerUI(ctx, { getClient, readConfig }) {
           }), 'text/html; charset=utf-8')
         }
 
-        if (req.method === 'GET' && ['/personal', '/teams', '/spaces', '/entries'].includes(route)) {
+        if (req.method === 'GET' && ['/personal', '/teams', '/spaces', '/entries', '/preview'].includes(route)) {
           // These routes use the desktop owner's Lexiang credential. Do not serve them to remote or cross-site callers.
           const local = /^(?:127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(req.socket?.remoteAddress || '')
           const host = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i.test(req.headers.host || '')
@@ -89,6 +120,25 @@ export function registerUI(ctx, { getClient, readConfig }) {
             const result = await (await getClient()).callTool(name === 'whoami' ? name : 'call_tool', name === 'whoami' ? {} : { tool_name: name, arguments: args })
             if (!result || (result.code != null && Number(result.code) !== 0)) throw new Error('Lexiang directory request failed')
             return result.data ?? result
+          }
+          if (route === '/preview') {
+            if (!entryId(parent)) return send(res, 400, { ok: false })
+            try {
+              const { entry } = await call('entry_describe_entry', { entry_id: parent })
+              if (!entry) return send(res, 404, { ok: false })
+              if (entry.entry_type === 'page') {
+                const result = await call('block_fetch_page', { entry_id: parent, render_mode: 'clean' })
+                const text = typeof result === 'string' ? result : result.text ?? (Array.isArray(result.content) ? result.content.filter(item => item.type === 'text').map(item => item.text).join('\n') : undefined)
+                if (typeof text !== 'string') throw new Error('Unexpected Lexiang page response')
+                return send(res, 200, { ok: true, markdown: text.slice(0, PREVIEW_LIMIT), truncated: text.length > PREVIEW_LIMIT })
+              }
+              if (entry.entry_type !== 'file' || !isMarkdown(entry) || !entryId(entry.target_id)) return send(res, 415, { ok: false })
+              const { url: signedUrl } = await call('file_download_file', { file_id: entry.target_id, expire_seconds: 120 })
+              return send(res, 200, { ok: true, ...await downloadMarkdown(signedUrl) })
+            } catch {
+              // Do not return upstream details: errors can contain temporary download URLs.
+              return send(res, 502, { ok: false, error: 'Markdown preview unavailable' })
+            }
           }
           const space = row => ({ id: row.root_entry_id, name: row.name })
           if (route === '/personal') {
@@ -105,6 +155,7 @@ export function registerUI(ctx, { getClient, readConfig }) {
           if (!Array.isArray(list)) throw new Error('Unexpected Lexiang directory response')
           const rows = list.map(row => route === '/spaces' ? space(row) : route === '/teams' ? { id: row.id, name: row.name } : {
             id: row.id, name: row.name, folder: row.entry_type === 'folder', children: Boolean(row.has_children), edited: row.edited_at,
+            preview: row.entry_type === 'page' || (row.entry_type === 'file' && isMarkdown(row)),
           }).filter(row => /^[a-zA-Z0-9_-]{1,128}$/.test(row.id || '') && typeof row.name === 'string')
           const next = rows.length && data.next_page_token !== cursor ? data.next_page_token || '' : ''
           return send(res, 200, { ok: true, rows, next })
@@ -125,7 +176,7 @@ export function registerUI(ctx, { getClient, readConfig }) {
         if (req.method === 'GET' && route === '/manifest') {
           return send(res, 200, {
             name: 'dsh-lexiang',
-            version: '1.1.0',
+            version: '1.2.1',
             routes: state.routes,
             note: 'token never exposed to browser',
           })
@@ -149,7 +200,7 @@ export function registerUI(ctx, { getClient, readConfig }) {
 
     state.available = true
     state.reason = ''
-    state.routes = ['/ui', '/status', '/popup', '/search', '/manifest', '/personal', '/teams', '/spaces', '/entries']
+    state.routes = ['/ui', '/status', '/popup', '/search', '/manifest', '/personal', '/teams', '/spaces', '/entries', '/preview']
     scoped.effect(() => () => {
       state.available = false
       dispose?.()

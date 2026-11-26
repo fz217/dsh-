@@ -37,6 +37,9 @@ window.__ModuleLoader__.load({
       .lexsb-date {font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;}
       @container (max-width: 280px) {.lexsb-date {display:none;}}
       .lexsb-browser {container-type:inline-size;}
+      .lexsb-preview header {display:flex;align-items:center;gap:10px;margin:0 0 12px;}
+      .lexsb-preview h3 {font-size:14px;margin:0;min-width:0;overflow-wrap:anywhere;}
+      .lexsb-preview pre {margin:0;padding:12px;border-radius:8px;background:var(--dsw-alias-bg-layer-1);white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.65;tab-size:4;}
     `;
     function sourceUrl(value) {
       try {
@@ -55,9 +58,58 @@ window.__ModuleLoader__.load({
           en: { personal:'My knowledge base', teams:'Team knowledge bases', find:'Search', back:'Back', loading:'Loading…', error:'Could not load this directory.', retry:'Retry', more:'Load more', noFiles:'Nothing here yet.', noPersonal:'No personal knowledge base available.', names:'Files and folders' },
           zh: { personal:'我的个人知识库', teams:'团队知识库', find:'搜索', back:'返回上一级', loading:'正在加载…', error:'无法加载目录。', retry:'重试', more:'加载更多', noFiles:'此目录暂无文件。', noPersonal:'未找到个人知识库。', names:'文件和文件夹' },
         };
+        Object.assign(navLabels.en, { backFiles:'Back to files', previewError:'Could not load the preview.', previewEmpty:'This document is empty.', previewTruncated:'This document exceeds the preview limit; only the beginning is shown.' });
+        Object.assign(navLabels.zh, { backFiles:'返回列表', previewError:'无法加载预览。', previewEmpty:'这篇文档没有正文。', previewTruncated:'文档超过预览上限，仅显示开头。' });
+        function Preview({ row, onBack }) {
+          const [revision, retry] = React.useState(0);
+          const [view, setView] = React.useState({ busy:true });
+          const heading = React.useRef(null);
+          React.useEffect(() => {
+            heading.current?.focus();
+          }, []);
+          React.useEffect(() => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => {
+              controller.abort();
+              setView({ error:true });
+            }, 35000);
+            setView({ busy:true });
+            (async () => {
+              try {
+                const res = await fetch('/api/dsh-lexiang/preview?' + new URLSearchParams({ id:row.id }), { credentials:'same-origin', redirect:'error', signal:controller.signal });
+                if (!res.ok) throw Error('Preview unavailable');
+                const data = await res.json();
+                if (!data.ok || typeof data.markdown !== 'string') throw Error('Unexpected preview response');
+                if (!controller.signal.aborted) setView(data);
+              } catch {
+                if (!controller.signal.aborted) setView({ error:true });
+              } finally { clearTimeout(timer); }
+            })();
+            return () => { clearTimeout(timer); controller.abort(); };
+          }, [row.id, revision]);
+          return h('section', { className:'lexsb-preview', 'aria-busy':Boolean(view.busy) },
+            h('header', null,
+              h('button', { type:'button', className:'lexsb-btn', onClick:onBack }, '← ', nav('backFiles')),
+              h('h3', { ref:heading, tabIndex:-1 }, row.name)),
+            view.busy && h('p', { role:'status' }, nav('loading')),
+            view.error && h('p', { role:'alert', className:'lexsb-error' }, nav('previewError'), ' ', h('button', { type:'button', className:'lexsb-btn', onClick:() => retry(n => n+1) }, nav('retry'))),
+            view.truncated && h('p', { role:'status' }, nav('previewTruncated')),
+            typeof view.markdown === 'string' && (view.markdown.trim() ? h('pre', null, view.markdown) : h('p', null, nav('previewEmpty'))));
+        }
         function Browser({ mode }) {
           const label = nav;
           const [path, setPath] = React.useState([]);
+          const [preview, setPreview] = React.useState(null);
+          const previewTrigger = React.useRef(null);
+          function closePreview() { setPreview(null); }
+          React.useEffect(() => {
+            if (!preview && previewTrigger.current) {
+              const { button, pane, scroll } = previewTrigger.current;
+              if (pane) pane.scrollTop = scroll;
+              button.focus({ preventScroll:true });
+              previewTrigger.current = null;
+            }
+          }, [preview]);
           const [page, setPage] = React.useState({ rows:[], next:'', busy:true });
           const [retry, setRetry] = React.useState(0);
           const current = path[path.length - 1];
@@ -107,6 +159,8 @@ window.__ModuleLoader__.load({
           const spaceRows = Boolean(current?.team);
           const pathText = [label(mode), ...path.map(row => row.name)].join(' / ');
           return h('div', { className:'lexsb-browser' },
+            preview && h(Preview, { key:preview.id, row:preview, onBack:closePreview }),
+            h('div', { hidden:Boolean(preview) },
             path.length > 0 && h('button', { type:'button', className:'lexsb-btn', onClick:() => setPath(p => p.slice(0,-1)) }, '← ', label('back')),
             h('div', { className:'lexsb-path' }, pathText),
             h('p', { role:'status', className:'lexsb-status' }, page.busy ? label('loading') : !page.error && !page.rows.length ? label(page.missing ? 'noPersonal' : 'noFiles') : ''),
@@ -117,11 +171,18 @@ window.__ModuleLoader__.load({
               const body = [h('span', { key:'icon', 'aria-hidden':true }, teamRows ? '👥' : folder ? '📁' : '📄'), h('span', { key:'name', className:'lexsb-name' }, row.name), validDate && h('time', { key:'date', className:'lexsb-date', dateTime:date.toISOString() }, date.toLocaleDateString())];
               return h('li', { key:row.id }, folder
                 ? h('button', { type:'button', className:'lexsb-row', onClick:() => setPath(p => [...p, { id:row.id, name:row.name, team:teamRows }]) }, ...body, h('span', { 'aria-hidden':true }, '›'))
-                : h('a', { className:'lexsb-row', href:'https://lexiangla.com/pages/' + encodeURIComponent(row.id), target:'_blank', rel:'noopener noreferrer' }, ...body),
+                : row.preview || /\.(?:md|markdown)$/i.test(row.name.trim())
+                  ? h('button', { type:'button', className:'lexsb-row', onClick:event => {
+                    const button = event.currentTarget;
+                    const pane = button.closest('.lexsb');
+                    previewTrigger.current = { button, pane, scroll:pane?.scrollTop ?? 0 };
+                    setPreview(row);
+                  } }, ...body, h('span', { 'aria-hidden':true }, '›'))
+                  : h('a', { className:'lexsb-row', href:'https://lexiangla.com/pages/' + encodeURIComponent(row.id), target:'_blank', rel:'noopener noreferrer' }, ...body),
                 !folder && row.children && h('button', { type:'button', className:'lexsb-btn', onClick:() => setPath(p => [...p, row]) }, '› ', label('names')));
             })),
             page.error && h('div', { role:'alert' }, label('error'), ' ', h('button', { type:'button', className:'lexsb-btn', onClick:() => page.next ? load(page.next) : setRetry(n => n+1) }, label('retry'))),
-            page.next && !page.error && h('button', { type:'button', className:'lexsb-btn', disabled:page.busy, onClick:() => load(page.next) }, label('more')));
+            page.next && !page.error && h('button', { type:'button', className:'lexsb-btn', disabled:page.busy, onClick:() => load(page.next) }, label('more'))));
         }
         for (const [lang, labels] of Object.entries(navLabels)) ctx.effect(() => ctx.locale.register(ID + '-nav', lang, labels));
         const nav = ctx.locale.bind(ID + '-nav');
