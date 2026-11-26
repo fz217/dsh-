@@ -1,48 +1,42 @@
-# dsh-lexiang
+# dsh-lexiang 插件仓库
 
-DeepSeek Harness 插件：连接乐享知识库，**v1.1.0 起自带 UI 弹窗与站内控制台**。
-
-完整说明与安装步骤见 [`dsh-lexiang/README.md`](dsh-lexiang/README.md)。
+DeepSeek Harness（dsh）插件集合。主插件见 [`dsh-lexiang/`](dsh-lexiang/README.md)，v1.1.0 起自带 UI 弹窗与站内控制台。
 
 ## 仓库结构
 
 ```
 .
-├── dsh-lexiang/                  # 插件本体（dsh plugin add 指向这里）
-│   ├── index.js
-│   ├── package.json
-│   ├── cordis.patch.yml
-│   ├── README.md
-│   ├── LICENSE
-│   ├── selftest.mjs
-│   └── src/
-│       ├── mcp-client.js
-│       ├── operations.js
-│       ├── ui.js
-│       └── ui-server.js
-├── package.json                  # 仓库级声明，供插件列表校验 dsh.bundle
-└── fz217__dsh-.yml               # awesome-dsh-plugin 投稿条目
+├── dsh-lexiang/            # 已发布插件：乐享知识库（v1.1.0，9 个工具 + UI 弹窗）
+├── plugins/                # 后续插件统一入口，按类别分级
+│   ├── knowledge/          # 知识库 / 文档类
+│   ├── media/              # 图像 / 视频 / 音频类
+│   ├── ai/                 # 大模型 / 推理 / ComfyUI 类
+│   ├── devops/             # 运维 / 监控 / 服务器类
+│   └── utility/            # 通用工具类
+├── templates/              # 插件脚手架：basic-tool / with-ui
+├── docs/                   # 开发文档、指南、示例
+├── scripts/                # 通用脚本与发布工具
+├── tests/                  # 跨插件测试与验收脚本
+├── package.json            # 仓库级 dsh.bundle 声明（列表收录校验用）
+└── fz217__dsh-.yml         # awesome-dsh-plugin 投稿条目
 ```
+
+## 历史说明
+
+`dsh-lexiang/` 是首个插件，按早期约定放在仓库根目录，**不发生迁移**，保证已安装的引用不断链。
+从第二个插件起，一律放进 `plugins/<类别>/<插件名>/`，便于后期扩展。
 
 ## 快速开始
 
 ```bash
 git clone https://github.com/fz217/dsh-.git
 cd dsh-/dsh-lexiang
-node selftest.mjs
-
-# 设置环境变量后安装
+node selftest.mjs        # 17/17 通过
 dsh plugin --profile web add .
 # 重启 dsh 服务
 ```
 
-环境变量：`LEXIANG_TOKEN`、`COMPANY_FROM`（在 <https://lexiangla.com/mcp> 获取）。
-
-## 工具
-
-`lexiang_search` / `lexiang_read` / `lexiang_list` / `lexiang_create_page` / `lexiang_update_page` / `lexiang_upload_file` / `lexiang_status` / `lexiang_popup` / `lexiang_ui`。
-
-其中 `lexiang_search`、`lexiang_read` 传 `popup=true` 即弹出可视化结果窗口；`lexiang_popup` 无需乐享凭据即可弹窗。
+环境变量：`LEXIANG_TOKEN`、`COMPANY_FROM`（在 https://lexiangla.com/mcp 获取）。
 
 ## 许可
 
