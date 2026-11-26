@@ -16,8 +16,8 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body))
 }
 
-function readConfigView(readConfig) {
-  const c = readConfig({}) || {}
+async function readConfigView(readConfig) {
+  const c = await readConfig() || {}
   return {
     ok: Boolean(c.token && c.companyFrom),
     endpoint: c.endpoint,
@@ -62,7 +62,7 @@ export function registerUI(ctx, { getClient, readConfig }) {
         }
 
         if (req.method === 'GET' && route === '/status') {
-          return send(res, 200, { ok: true, ...readConfigView(readConfig), ui: state.available })
+          return send(res, 200, { ok: true, ...await readConfigView(readConfig), ui: state.available })
         }
 
         if (req.method === 'GET' && route === '/popup') {
@@ -76,10 +76,44 @@ export function registerUI(ctx, { getClient, readConfig }) {
           }), 'text/html; charset=utf-8')
         }
 
+        if (req.method === 'GET' && ['/personal', '/teams', '/spaces', '/entries'].includes(route)) {
+          // These routes use the desktop owner's Lexiang credential. Do not serve them to remote or cross-site callers.
+          const local = /^(?:127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(req.socket?.remoteAddress || '')
+          const host = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i.test(req.headers.host || '')
+          const site = req.headers['sec-fetch-site']
+          if (!local || !host || (site && site !== 'same-origin' && site !== 'none')) return send(res, 403, { ok: false })
+          const parent = url.searchParams.get('id') || ''
+          const cursor = url.searchParams.get('cursor') || ''
+          if ((['/spaces', '/entries'].includes(route) && !/^[a-zA-Z0-9_-]{1,128}$/.test(parent)) || cursor.length > 2048) return send(res, 400, { ok: false })
+          const call = async (name, args) => {
+            const result = await (await getClient()).callTool(name === 'whoami' ? name : 'call_tool', name === 'whoami' ? {} : { tool_name: name, arguments: args })
+            if (!result || (result.code != null && Number(result.code) !== 0)) throw new Error('Lexiang directory request failed')
+            return result.data ?? result
+          }
+          const space = row => ({ id: row.root_entry_id, name: row.name })
+          if (route === '/personal') {
+            const data = await call('whoami')
+            return send(res, 200, { ok: true, personal: data.personal_space?.root_entry_id ? space(data.personal_space) : null })
+          }
+          const spec = {
+            '/teams': ['team_list_teams', 'teams', {}],
+            '/spaces': ['space_list_spaces', 'spaces', { team_id: parent }],
+            '/entries': ['entry_list_children', 'entries', { parent_id: parent }],
+          }[route]
+          const data = await call(spec[0], { ...spec[2], limit: 40, ...(cursor ? { page_token: cursor } : {}) })
+          const list = data[spec[1]] ?? [] // Lexiang omits the repeated field on an empty page.
+          if (!Array.isArray(list)) throw new Error('Unexpected Lexiang directory response')
+          const rows = list.map(row => route === '/spaces' ? space(row) : route === '/teams' ? { id: row.id, name: row.name } : {
+            id: row.id, name: row.name, folder: row.entry_type === 'folder', children: Boolean(row.has_children), edited: row.edited_at,
+          }).filter(row => /^[a-zA-Z0-9_-]{1,128}$/.test(row.id || '') && typeof row.name === 'string')
+          const next = rows.length && data.next_page_token !== cursor ? data.next_page_token || '' : ''
+          return send(res, 200, { ok: true, rows, next })
+        }
+
         if (req.method === 'GET' && route === '/search') {
           const q = url.searchParams.get('q') || ''
           if (!q) return send(res, 400, { ok: false, error: '缺少 q 参数' })
-          const result = await ops.search(getClient(), { query: q, mode: 'semantic' })
+          const result = await ops.search(await getClient(), { query: q, mode: 'semantic' })
           return send(res, 200, {
             ok: true,
             query: q,
@@ -115,7 +149,7 @@ export function registerUI(ctx, { getClient, readConfig }) {
 
     state.available = true
     state.reason = ''
-    state.routes = ['/ui', '/status', '/popup', '/search', '/manifest']
+    state.routes = ['/ui', '/status', '/popup', '/search', '/manifest', '/personal', '/teams', '/spaces', '/entries']
     scoped.effect(() => () => {
       state.available = false
       dispose?.()

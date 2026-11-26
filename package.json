@@ -1,9 +1,9 @@
 {
   "name": "dsh-lexiang",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
-  "description": "DeepSeek Harness plugin repository: Lexiang knowledge base tools with a built-in UI popup and web console. Plugin entry lives in dsh-lexiang/.",
+  "description": "DeepSeek Harness plugin for browsing and searching Lexiang knowledge bases, with knowledge management tools.",
   "main": "./dsh-lexiang/index.js",
   "files": [
     "dsh-lexiang"
@@ -22,11 +22,26 @@
   "dsh": {
     "bundle": {
       "patch": "./dsh-lexiang/cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-locale"
+      ]
     }
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/cordis": "^4.0.2"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "exports": {
+    ".": "./dsh-lexiang/index.js",
+    "./client": "./dsh-lexiang/client.js",
+    "./mcp-client": "./dsh-lexiang/src/mcp-client.js",
+    "./icon": "./dsh-lexiang/icon.svg",
+    "./package.json": "./package.json"
+  }
 }

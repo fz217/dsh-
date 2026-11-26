@@ -90,10 +90,12 @@ const SCRIPT = `
 (function(){
   var d=document.getElementById('lx-dialog');
   var close=document.getElementById('lx-close');
-  var dismiss=function(){ if(d.open) d.close(); };
+  var dismiss=function(){ if(d && d.open) d.close(); };
   if(close) close.addEventListener('click',dismiss);
-  d.addEventListener('click',function(e){ if(e.target===d) dismiss(); });
-  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&d.open){e.preventDefault();dismiss();} },true);
+  if(d) {
+    d.addEventListener('click',function(e){ if(e.target===d) dismiss(); });
+    document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&d.open){e.preventDefault();dismiss();} },true);
+  }
   var copy=document.getElementById('lx-copy');
   if(copy) copy.addEventListener('click',function(){
     var raw=document.getElementById('lx-data').textContent||'';

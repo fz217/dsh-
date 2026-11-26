@@ -32,19 +32,33 @@ try {
 if (typeof defineTool !== 'function') defineTool = (t) => t
 
 export const name = 'dsh-lexiang'
-export const inject = ['tools']
+export const inject = ['tools', 'credentials']
 
 /** Lazy singleton — never build a client before the first tool call. */
 let client = null
 let logger = console
 let uiState = null
+let credentialStore
 
-function getClient() {
-  if (!client) {
-    const config = readConfig()
+async function currentConfig() {
+  const config = readConfig()
+  if (credentialStore) {
+    const [token, company] = await Promise.all([
+      credentialStore.resolve('LEXIANG_TOKEN'),
+      credentialStore.resolve('COMPANY_FROM'),
+    ])
+    config.token = token?.value || config.token
+    config.companyFrom = company?.value || config.companyFrom
+  }
+  return config
+}
+
+async function getClient() {
+  const config = await currentConfig()
+  if (!client || Object.keys(config).some(key => config[key] !== client.config[key])) {
     if (!config.token) {
       throw new LexiangMcpError(
-        '未配置 LEXIANG_TOKEN。请在启动 dsh 前设置环境变量 LEXIANG_TOKEN 与 COMPANY_FROM。',
+        '未配置 LEXIANG_TOKEN。请在 DSH 凭据中配置 LEXIANG_TOKEN 与 COMPANY_FROM，或设置对应环境变量。',
         'NO_TOKEN',
       )
     }
@@ -83,9 +97,10 @@ const REQUIRED = {
 }
 
 const S = (type, description, required = false) => ({ type, description, ...(required ? { required: true } : {}) })
+const T = () => ({ schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] })
 
-function configStatus() {
-  const c = readConfig()
+async function configStatus() {
+  const c = await currentConfig()
   return {
     ok: Boolean(c.token && c.companyFrom),
     endpoint: c.endpoint,
@@ -102,8 +117,9 @@ function configStatus() {
 
 export function apply(ctx) {
   logger = ctx.logger || console
+  credentialStore = ctx.credentials
 
-  uiState = registerUI(ctx, { getClient, readConfig }) || {
+  uiState = registerUI(ctx, { getClient, readConfig: currentConfig }) || {
     available: false,
     consoleUrl: '',
     reason: 'ui not registered',
@@ -119,10 +135,10 @@ export function apply(ctx) {
       limit: S('number', '返回条数，1-50，默认 10'),
       popup: S('boolean', 'true 时把检索结果用自带 UI 弹窗展示'),
     },
-    output: { schema: { type: 'object' } },
+    output: T(),
     async execute(args) {
       return safe('search', async () => {
-        const result = await ops.search(getClient(), args)
+        const result = await ops.search(await getClient(), args)
         let ui = null
         if (args?.popup === true) {
           const items = normalizeItems(result.results)
@@ -152,10 +168,10 @@ export function apply(ctx) {
       raw: S('boolean', 'true 返回原始解析结果，默认截断到 30000 字符'),
       popup: S('boolean', 'true 时把正文用自带 UI 弹窗展示'),
     },
-    output: { schema: { type: 'object' } },
+    output: T(),
     async execute(args) {
       return safe('read', async () => {
-        const result = await ops.readPage(getClient(), args)
+        const result = await ops.readPage(await getClient(), args)
         let ui = null
         if (args?.popup === true) {
           const content = typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
@@ -180,8 +196,8 @@ export function apply(ctx) {
       parent_id: S('string', '父条目 ID；知识库根 ID 可用 space_describe_space 获取', true),
       page_size: S('number', '每页条数，默认 50'),
     },
-    output: { schema: { type: 'object' } },
-    async execute(args) { return safe('list', () => ops.listChildren(getClient(), args), args) },
+    output: T(),
+    async execute(args) { return safe('list', async () => ops.listChildren(await getClient(), args), args) },
   }))
 
   ctx.tools.register(defineTool({
@@ -193,8 +209,8 @@ export function apply(ctx) {
       content_markdown: S('string', '页面正文，Markdown 格式'),
       after: S('string', '插入到指定条目之后的可选 ID'),
     },
-    output: { schema: { type: 'object' } },
-    async execute(args) { return safe('create', () => ops.createPage(getClient(), args), args) },
+    output: T(),
+    async execute(args) { return safe('create', async () => ops.createPage(await getClient(), args), args) },
   }))
 
   ctx.tools.register(defineTool({
@@ -204,11 +220,11 @@ export function apply(ctx) {
       entry_id: S('string', '页面条目 ID', true),
       command: S('string', 'replace_content 或 update_content', true),
       new_str: S('string', 'replace_content 的完整新正文'),
-      content_updates: S('object', 'update_content 的替换数组：[{old_str,new_str,replace_all_matches?}]'),
+      content_updates: S('json', 'update_content 的替换数组：[{old_str,new_str,replace_all_matches?}]'),
       content_format: S('string', 'markdown，默认'),
     },
-    output: { schema: { type: 'object' } },
-    async execute(args) { return safe('update', () => ops.updatePage(getClient(), args), args) },
+    output: T(),
+    async execute(args) { return safe('update', async () => ops.updatePage(await getClient(), args), args) },
   }))
 
   ctx.tools.register(defineTool({
@@ -218,20 +234,20 @@ export function apply(ctx) {
       file_path: S('string', '本机文件的绝对路径', true),
       parent_id: S('string', '乐享父条目 ID', true),
     },
-    output: { schema: { type: 'object' } },
-    async execute(args) { return safe('upload', () => ops.uploadFile(getClient(), args), args) },
+    output: T(),
+    async execute(args) { return safe('upload', async () => ops.uploadFile(await getClient(), args), args) },
   }))
 
   ctx.tools.register(defineTool({
     name: 'lexiang_status',
     description: '检查乐享连接状态、环境变量配置和 UI 弹窗通道状态。连接报错时先调用此工具诊断。',
     parameters: {},
-    output: { schema: { type: 'object' } },
+    output: T(),
     async execute() {
-      const c = configStatus()
+      const c = await configStatus()
       return {
         ...c,
-        hint: c.ok ? '配置就绪，可调用其他乐享工具' : '请设置 LEXIANG_TOKEN 与 COMPANY_FROM 环境变量后重启 dsh',
+        hint: c.ok ? '配置就绪，可调用其他乐享工具' : '请在 DSH 凭据中配置 LEXIANG_TOKEN 与 COMPANY_FROM，配置后下次调用自动生效',
       }
     },
   }))
@@ -243,15 +259,15 @@ export function apply(ctx) {
       title: S('string', '弹窗标题'),
       subtitle: S('string', '副标题'),
       content: S('string', '正文，纯文本，支持换行'),
-      items: S('object', '条目数组，每项可含 title / desc / url / meta'),
-      chips: S('object', '顶部标签数组，每项可含 label / tone（ok、warn、err）'),
+      items: S('json', '条目数组，每项可含 title / desc / url / meta'),
+      chips: S('json', '顶部标签数组，每项可含 label / tone（ok、warn、err）'),
       mode: S('string', 'custom（默认）或 status（展示乐享连接与 UI 状态）'),
     },
-    output: { schema: { type: 'object' } },
+    output: T(),
     async execute(args) {
       return safe('popup', async () => {
         const mode = args?.mode || 'custom'
-        const status = configStatus()
+        const status = await configStatus()
         const title = args?.title || (mode === 'status' ? '乐享连接状态' : 'dsh-lexiang 提示')
         const subtitle = args?.subtitle || (mode === 'status' ? '环境变量与 UI 通道诊断' : '来自 dsh 会话的可视化弹窗')
         const content = mode === 'status'
@@ -282,9 +298,9 @@ export function apply(ctx) {
     parameters: {
       open: S('boolean', 'true 时立即打开独立浏览器弹窗，默认 false'),
     },
-    output: { schema: { type: 'object' } },
+    output: T(),
     async execute(args) {
-      const status = configStatus()
+      const status = await configStatus()
       let ui = null
       if (args?.open === true || !status.ui.available) {
         const html = buildPopupHtml({

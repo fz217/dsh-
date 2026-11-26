@@ -1,6 +1,6 @@
 # dsh-lexiang 插件仓库
 
-DeepSeek Harness（dsh）插件集合。主插件见 [`dsh-lexiang/`](dsh-lexiang/README.md)，v1.1.0 起自带 UI 弹窗与站内控制台。
+DeepSeek Harness（dsh）插件集合。主插件见 [`dsh-lexiang/`](dsh-lexiang/README.md)。v1.2.0 集成乐享目录侧栏：浏览个人与团队知识库、打开原文并搜索。
 
 ## 仓库结构
 
